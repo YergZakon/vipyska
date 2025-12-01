@@ -31,13 +31,16 @@ class EurasianParser(BaseParser):
             if path.suffix.lower() not in ('.xlsx', '.xls'):
                 return False
 
-            df = pd.read_excel(file_path, header=None, nrows=5)
+            df = pd.read_excel(file_path, header=None, nrows=20)
 
             # Проверяем характерные заголовки Евразийского банка
-            # Уникальная комбинация: ИИН + Тип операции + Детали операции (без "Дата и время")
-            for idx in range(min(3, len(df))):
+            for idx in range(min(20, len(df))):
                 row = df.iloc[idx]
                 row_text = ' '.join(str(v).lower() for v in row if pd.notna(v))
+
+                # Новый формат: "БИК EURIKZKA"
+                if 'eurikzka' in row_text:
+                    return True
 
                 # Евразийский имеет "Тип операции" и "Детали операции" одновременно
                 if 'тип операции' in row_text and 'детали операции' in row_text:
@@ -78,12 +81,43 @@ class EurasianParser(BaseParser):
         metadata.bank_name = self.BANK_NAME
         metadata.source_file = self.file_path.name
 
+        # Извлекаем метаданные из заголовка (новый формат)
+        for idx in range(min(20, len(df_raw))):
+            row = df_raw.iloc[idx]
+            row_text = ' '.join(str(v) for v in row if pd.notna(v))
+            row_lower = row_text.lower()
+
+            if 'клиент:' in row_lower:
+                match = re.search(r'клиент:\s*(.+)', row_text, re.IGNORECASE)
+                if match:
+                    metadata.client_name = match.group(1).strip()
+
+            if 'иин/бин' in row_lower:
+                match = re.search(r'(\d{12})', row_text)
+                if match:
+                    metadata.client_bin_iin = match.group(1)
+
+            if 'иик' in row_lower or 'лицевой счет' in row_lower:
+                match = re.search(r'(KZ\w+)', row_text)
+                if match:
+                    metadata.account_number = match.group(1)
+
+            if 'выписка за период' in row_lower:
+                dates = re.findall(r'(\d{2}\.\d{2}\.\d{4})', row_text)
+                if len(dates) >= 2:
+                    metadata.period_start = self._parse_date(dates[0], ['%d.%m.%Y'])
+                    metadata.period_end = self._parse_date(dates[1], ['%d.%m.%Y'])
+
         # Ищем строку с заголовками
         header_row = 1
-        for idx in range(min(5, len(df_raw))):
+        for idx in range(min(20, len(df_raw))):
             row = df_raw.iloc[idx]
             row_text = ' '.join(str(v).lower() for v in row if pd.notna(v))
             if 'иин' in row_text and 'тип операции' in row_text:
+                header_row = idx
+                break
+            # Новый формат с "Дата проводки"
+            if 'дата проводки' in row_text and ('дебет' in row_text or 'кредит' in row_text):
                 header_row = idx
                 break
 
@@ -95,18 +129,26 @@ class EurasianParser(BaseParser):
             col_lower = str(col).lower()
             if 'иин' in col_lower and 'бин' not in col_lower:
                 col_map['iin'] = col
-            elif 'тип операции' in col_lower:
+            elif 'тип операции' in col_lower or 'вид операции' in col_lower:
                 col_map['operation_type'] = col
             elif 'номер счета' in col_lower:
                 col_map['account'] = col
-            elif col_lower == 'дата':
+            elif col_lower == 'дата' or 'дата проводки' in col_lower:
                 col_map['date'] = col
             elif col_lower == 'сумма':
                 col_map['amount'] = col
+            elif 'дебет' in col_lower:
+                col_map['debit'] = col
+            elif 'кредит' in col_lower:
+                col_map['credit'] = col
             elif col_lower == 'валюта':
                 col_map['currency'] = col
-            elif 'детали' in col_lower:
+            elif 'детали' in col_lower or 'назначение' in col_lower:
                 col_map['description'] = col
+            elif 'бенефициар' in col_lower or 'отправител' in col_lower:
+                col_map['counterparty'] = col
+            elif 'иин/бин' in col_lower:
+                col_map['counterparty_bin'] = col
 
         transactions = []
 
@@ -129,8 +171,31 @@ class EurasianParser(BaseParser):
                 if date is None:
                     continue
 
+                # Парсим суммы - поддержка обоих форматов
                 amount = self._parse_amount_with_spaces(row.get(col_map.get('amount')))
-                if amount is None or amount == 0:
+                debit = self._parse_amount_with_spaces(row.get(col_map.get('debit')))
+                credit = self._parse_amount_with_spaces(row.get(col_map.get('credit')))
+
+                # Определяем сумму и направление
+                if credit and credit > 0:
+                    direction = 'income'
+                    final_amount = credit
+                elif debit and debit > 0:
+                    direction = 'expense'
+                    final_amount = debit
+                elif amount and amount > 0:
+                    # Старый формат - определяем по типу операции
+                    operation_type = self._clean_string(row.get(col_map.get('operation_type'), ''))
+                    op_lower = operation_type.lower()
+                    if 'payment to client' in op_lower or 'зачисление' in op_lower or 'пополн' in op_lower:
+                        direction = 'income'
+                    else:
+                        direction = 'expense'
+                    final_amount = amount
+                else:
+                    continue
+
+                if final_amount == 0:
                     continue
 
                 # Извлекаем ИИН клиента
@@ -145,31 +210,35 @@ class EurasianParser(BaseParser):
                 currency = self._clean_string(row.get(col_map.get('currency'), 'KZT'))
                 operation_type = self._clean_string(row.get(col_map.get('operation_type'), ''))
                 description = self._clean_string(row.get(col_map.get('description'), ''))
+                counterparty = self._clean_string(row.get(col_map.get('counterparty'), ''))
+                counterparty_bin = self._extract_bin_iin(row.get(col_map.get('counterparty_bin'), ''))
 
-                # Определяем направление по типу операции
-                op_lower = operation_type.lower()
-                if 'payment to client' in op_lower or 'зачисление' in op_lower or 'пополн' in op_lower:
-                    direction = 'income'
-                elif 'снятие' in op_lower or 'списание' in op_lower or 'cash' in op_lower:
-                    direction = 'expense'
+                if direction == 'income':
+                    payer_name = counterparty
+                    payer_bin = counterparty_bin
+                    recipient_name = metadata.client_name or ''
+                    recipient_bin = metadata.client_bin_iin or iin
                 else:
-                    direction = 'income'  # По умолчанию
+                    payer_name = metadata.client_name or ''
+                    payer_bin = metadata.client_bin_iin or iin
+                    recipient_name = counterparty
+                    recipient_bin = counterparty_bin
 
                 transaction = UnifiedTransaction(
                     date=date,
-                    amount=abs(amount),
+                    amount=abs(final_amount),
                     currency=currency,
-                    amount_kzt=abs(amount) if currency == 'KZT' else None,
+                    amount_kzt=abs(final_amount) if currency == 'KZT' else None,
                     direction=direction,
-                    payer_name='',
-                    payer_bin_iin=iin if direction == 'expense' else '',
-                    recipient_name='',
-                    recipient_bin_iin=iin if direction == 'income' else '',
+                    payer_name=payer_name,
+                    payer_bin_iin=payer_bin,
+                    recipient_name=recipient_name,
+                    recipient_bin_iin=recipient_bin,
                     operation_type=operation_type,
                     description=description,
                     source_bank=self.BANK_NAME,
                     source_file=self.file_path.name,
-                    account_number=account,
+                    account_number=account if account else metadata.account_number,
                 )
 
                 transactions.append(transaction)

@@ -17,6 +17,15 @@ from .kassanova_parser import KassaNovaParser
 from .altyn_parser import AltynParser
 from .alatau_parser import AlatauParser
 from .boc_parser import BOCParser
+from .halykfinance_parser import HalykFinanceParser
+from .zaman_parser import ZamanParser
+from .citibank_parser import CitibankParser
+from .razvitiya_parser import RazvitiyaParser
+from .cesna_parser import CesnaParser
+from .kazkom_parser import KazkomParser
+from .alhilal_parser import AlHilalParser
+from .kzi_parser import KZIParser
+from .simple_parser import SimpleParser
 
 __all__ = [
     'BaseParser',
@@ -38,12 +47,30 @@ __all__ = [
     'AltynParser',
     'AlatauParser',
     'BOCParser',
+    'HalykFinanceParser',
+    'ZamanParser',
+    'CitibankParser',
+    'RazvitiyaParser',
+    'CesnaParser',
+    'KazkomParser',
+    'AlHilalParser',
+    'KZIParser',
+    'SimpleParser',
 ]
 
 # Список всех доступных парсеров
 # Порядок важен - более специфичные парсеры должны быть раньше
 PARSERS = [
     # Банки с уникальными форматами (высокая специфичность)
+    HalykFinanceParser,  # Halyk Finance - ценные бумаги
+    ZamanParser,         # Заман-Банк - ZAJSKZ22
+    CitibankParser,      # Ситибанк справки
+    RazvitiyaParser,     # Банк Развития - DVKAKZKA
+    CesnaParser,         # Цеснабанк - TSESKZKA
+    KazkomParser,        # Казкоммерцбанк - старый формат
+    AlHilalParser,       # Al Hilal - HLALKZKZ
+    KZIParser,           # КЗИ Банк
+
     RBKParser,           # Английские заголовки POSTING_DATE
     DeltaParser,         # Листы "Входящие платеж в тенге"
     NurbankParser,       # "Операции, проведенные в АБИС"
@@ -64,4 +91,7 @@ PARSERS = [
     EurasianParser,      # "Тип операции", "Детали операции"
     CenterCreditParser,  # Листы "Входящие операции"
     FreedomParser,       # Листы KZ...KZT/USD (проверяется последним)
+
+    # Универсальный парсер (используется как последний вариант)
+    SimpleParser,        # Простые табличные форматы
 ]

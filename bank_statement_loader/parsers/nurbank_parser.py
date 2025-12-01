@@ -31,12 +31,14 @@ class NurbankParser(BaseParser):
             if path.suffix.lower() not in ('.xlsx', '.xls'):
                 return False
 
-            df = pd.read_excel(file_path, header=None, nrows=12)
+            df = pd.read_excel(file_path, header=None, nrows=15)
 
-            for idx in range(min(10, len(df))):
+            for idx in range(min(15, len(df))):
                 row = df.iloc[idx]
                 row_text = ' '.join(str(v).lower() for v in row if pd.notna(v))
                 if 'операции, проведенные в абис' in row_text:
+                    return True
+                if 'операции, полученные из абис' in row_text:
                     return True
                 if 'нурбанк' in row_text or 'nurbank' in row_text:
                     return True

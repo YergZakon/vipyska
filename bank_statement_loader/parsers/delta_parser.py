@@ -39,6 +39,11 @@ class DeltaParser(BaseParser):
                 return True
             if any('исходящие платеж' in s and 'тенге' in s for s in sheet_names_lower):
                 return True
+            # Новый формат: "Исходящий платеж, валюта", "Входящий платеж, тенге"
+            if any('исходящий платеж' in s for s in sheet_names_lower):
+                return True
+            if any('входящий платеж' in s for s in sheet_names_lower):
+                return True
 
             # Проверяем содержимое - Delta Bank имеет специфичную структуру
             df = pd.read_excel(file_path, header=None, nrows=5)
@@ -47,6 +52,9 @@ class DeltaParser(BaseParser):
                 row_text = ' '.join(str(v).lower() for v in row if pd.notna(v))
                 # Delta Bank имеет "1. Входящие платежи" в тексте
                 if '1. входящие платежи' in row_text or '2. исходящие платежи' in row_text:
+                    return True
+                # Новый формат с "Клиент, ФИО, ИИН"
+                if 'клиент,' in row_text and 'иин' in row_text:
                     return True
 
             return False
@@ -82,7 +90,14 @@ class DeltaParser(BaseParser):
             # Убираем номер пункта если есть
             first_row = re.sub(r'^\d+\.\s*', '', first_row).strip()
             if first_row and 'платеж' not in first_row.lower():
-                metadata.client_name = first_row
+                # Формат "Клиент, ФИО, ИИН..."
+                if 'клиент,' in first_row.lower():
+                    match = re.search(r'Клиент,\s*([^,]+),\s*ИИН(\d+)', first_row, re.IGNORECASE)
+                    if match:
+                        metadata.client_name = match.group(1).strip()
+                        metadata.client_bin_iin = match.group(2)
+                else:
+                    metadata.client_name = first_row
 
         transactions = []
 
@@ -96,6 +111,14 @@ class DeltaParser(BaseParser):
                 direction = 'expense'
             else:
                 continue  # Пропускаем неизвестные листы
+
+            # Определяем валюту из названия листа
+            if 'usd' in sheet_lower or 'валюта' in sheet_lower or 'доллар' in sheet_lower:
+                sheet_currency = 'USD'
+            elif 'eur' in sheet_lower or 'евро' in sheet_lower:
+                sheet_currency = 'EUR'
+            else:
+                sheet_currency = 'KZT'
 
             df_raw = pd.read_excel(self.file_path, sheet_name=sheet_name, header=None)
 
@@ -158,8 +181,8 @@ class DeltaParser(BaseParser):
                     transaction = UnifiedTransaction(
                         date=date,
                         amount=abs(amount),
-                        currency='KZT',
-                        amount_kzt=abs(amount),
+                        currency=sheet_currency,
+                        amount_kzt=abs(amount) if sheet_currency == 'KZT' else None,
                         direction=direction,
                         payer_name=payer_name,
                         payer_bin_iin=payer_bin,
