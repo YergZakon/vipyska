@@ -12,6 +12,11 @@ from .delta_parser import DeltaParser
 from .homecredit_parser import HomeCreditParser
 from .otbasy_parser import OtbasyParser
 from .vtb_parser import VTBParser
+from .tengri_parser import TengriParser
+from .kassanova_parser import KassaNovaParser
+from .altyn_parser import AltynParser
+from .alatau_parser import AlatauParser
+from .boc_parser import BOCParser
 
 __all__ = [
     'BaseParser',
@@ -28,6 +33,11 @@ __all__ = [
     'HomeCreditParser',
     'OtbasyParser',
     'VTBParser',
+    'TengriParser',
+    'KassaNovaParser',
+    'AltynParser',
+    'AlatauParser',
+    'BOCParser',
 ]
 
 # Список всех доступных парсеров
@@ -41,6 +51,11 @@ PARSERS = [
     OtbasyParser,        # "Жилстройсбербанк", HCSKKZKA
     VTBParser,           # "Вид операции (КД)", формат даты YYYY.MM.DD
     KaspiStatsParser,    # "Статистика по успешным операциям" (до обычного Kaspi!)
+    TengriParser,        # "Tengri Bank" в заголовке
+    KassaNovaParser,     # "Входящие платежи" с "бенефициара/отправителя"
+    AlatauParser,        # "Alatau City Bank", лист Statement
+    BOCParser,           # "Банк Китая", BKCHKZKA
+    AltynParser,         # "Altyn Bank", ATYNKZKA
 
     # Банки со стандартным форматом (средняя специфичность)
     HomeCreditParser,    # Код 886 в номере счёта
