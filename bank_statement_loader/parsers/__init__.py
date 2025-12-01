@@ -1,6 +1,7 @@
 from .base_parser import BaseParser
 from .halyk_parser import HalykParser
 from .kaspi_parser import KaspiParser
+from .kaspi_stats_parser import KaspiStatsParser
 from .centercredit_parser import CenterCreditParser
 from .freedom_parser import FreedomParser
 from .forte_parser import ForteParser
@@ -16,6 +17,7 @@ __all__ = [
     'BaseParser',
     'HalykParser',
     'KaspiParser',
+    'KaspiStatsParser',
     'CenterCreditParser',
     'FreedomParser',
     'ForteParser',
@@ -38,6 +40,7 @@ PARSERS = [
     ForteParser,         # "Инфорация по переводам"
     OtbasyParser,        # "Жилстройсбербанк", HCSKKZKA
     VTBParser,           # "Вид операции (КД)", формат даты YYYY.MM.DD
+    KaspiStatsParser,    # "Статистика по успешным операциям" (до обычного Kaspi!)
 
     # Банки со стандартным форматом (средняя специфичность)
     HomeCreditParser,    # Код 886 в номере счёта
