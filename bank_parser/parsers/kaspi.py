@@ -30,29 +30,43 @@ class KaspiStatementParser(BaseParser):
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
         folder = file_info.get('folder_name', '').lower()
 
-        # Check for Kaspi-specific metadata
-        for row in sheet.rows[:15]:
+        has_kaspi_mention = False
+        has_balance = False
+        has_payer_recipient = False
+        has_vidy_operacii = False
+
+        for row in sheet.rows[:25]:
             for cell in row:
                 if cell is None:
                     continue
                 s = str(cell)
-                if 'Kaspi Bank' in s or 'КАСПИ' in s.upper():
-                    # Check it's a statement (not statistics or partner list)
-                    for row2 in sheet.rows[:20]:
-                        for cell2 in row2:
-                            if cell2 and 'входящий остаток' in str(cell2).lower():
-                                return 0.95
-                            if cell2 and 'плательщик' in str(cell2).lower():
-                                return 0.9
+                s_low = s.lower()
+                if 'Kaspi Bank' in s or 'КАСПИ' in s.upper() or 'KASPI' in s.upper():
+                    has_kaspi_mention = True
+                if 'входящий остаток' in s_low:
+                    has_balance = True
+                if 'плательщик' in s_low:
+                    has_payer_recipient = True
+                if 'получател' in s_low:
+                    has_payer_recipient = True
+                if 'виды операции' in s_low or 'категория документа' in s_low:
+                    has_vidy_operacii = True
 
-        if 'kaspi' in folder:
-            # Check if it has statement structure
-            for row in sheet.rows[:20]:
-                row_text = ' '.join(str(c).lower() for c in row if c)
-                if 'плательщик' in row_text and 'получател' in row_text:
-                    return 0.85
-                if 'входящий остаток' in row_text:
-                    return 0.85
+        # Kaspi Bank explicitly mentioned + statement structure
+        if has_kaspi_mention and has_balance:
+            return 0.95
+        if has_kaspi_mention and has_payer_recipient:
+            return 0.9
+
+        # No explicit Kaspi mention, but strong structural match
+        # (Kaspi has unique combo: "Входящий остаток" + "Виды операции" + "Плательщик"/"Получатель")
+        if has_balance and has_vidy_operacii and has_payer_recipient:
+            return 0.88
+
+        # Folder hint
+        if 'kaspi' in folder or 'каспи' in folder:
+            if has_payer_recipient or has_balance:
+                return 0.85
 
         return 0.0
 
@@ -99,52 +113,73 @@ class KaspiStatementParser(BaseParser):
             if 'дата' in h and 'операц' in h:
                 col_map['date'] = i
             elif h == 'дата' or 'дата опер' in h:
-                col_map['date'] = i
+                col_map.setdefault('date', i)
             elif 'валюта' in h:
                 col_map['currency'] = i
-            elif 'сумма' in h and 'тенге' not in h and 'нб' not in h:
+            elif 'виды операции' in h or 'категория документа' in h:
+                col_map['operation_type'] = i
+            elif 'сумма' in h and ('валют' in h or ('тенге' not in h and 'нб' not in h)):
                 col_map['amount'] = i
             elif 'сумма' in h and ('тенге' in h or 'нб' in h):
                 col_map['amount_tenge'] = i
             elif 'направлен' in h:
                 col_map['direction'] = i
+            elif 'назначение' in h and 'код' not in h:
+                col_map['payment_purpose'] = i
+            elif 'код назначен' in h or 'кнп' in h:
+                col_map['knp'] = i
 
         # For Kaspi, sub-header might define Плательщик/Получатель sub-columns
+        # Build parent map: for merged cells, propagate parent rightward
+        parent_map = {}  # col_index -> parent header text
         if sub_header:
+            current_parent = ''
+            for i, h in enumerate(header_lower):
+                if h:
+                    current_parent = h
+                parent_map[i] = current_parent
+
             sub_lower = [str(c).lower().strip() if c else '' for c in sub_header]
-            # Map sub-header columns
             for i, h in enumerate(sub_lower):
-                if 'наименование' in h and i < len(header_lower):
-                    parent = header_lower[i] if header_lower[i] else ''
-                    # Inherit from parent merged cell - check leftward
-                    for j in range(i, -1, -1):
-                        if header_lower[j]:
-                            parent = header_lower[j]
-                            break
+                parent = parent_map.get(i, '')
+                if 'наименование' in h or h == 'фио':
                     if 'плательщик' in parent:
                         col_map['payer'] = i
                     elif 'получател' in parent:
                         col_map['recipient'] = i
                 elif 'иин' in h or 'бин' in h:
-                    # Check parent for context
-                    parent = ''
-                    for j in range(i, -1, -1):
-                        if header_lower[j]:
-                            parent = header_lower[j]
-                            break
                     if 'плательщик' in parent:
                         col_map['payer_iin'] = i
                     elif 'получател' in parent:
                         col_map['recipient_iin'] = i
+                elif 'банк' in h:
+                    if 'плательщик' in parent:
+                        col_map['payer_bank'] = i
+                    elif 'получател' in parent:
+                        col_map['recipient_bank'] = i
+                elif 'счет' in h or 'номер счета' in h:
+                    if 'плательщик' in parent:
+                        col_map['payer_account'] = i
+                    elif 'получател' in parent:
+                        col_map['recipient_account'] = i
                 elif 'назначение' in h:
-                    col_map['payment_purpose'] = i
+                    col_map.setdefault('payment_purpose', i)
                 elif 'кнп' in h or 'код' in h:
-                    col_map['knp'] = i
+                    col_map.setdefault('knp', i)
 
-        # Determine data start (skip header + sub-header)
+        # Determine data start (skip header + sub-header + optional numbering row)
         data_start = header_idx + 1
         if sub_header and any(c for c in sub_header if c is not None):
             data_start = header_idx + 2
+
+        # Skip numbering row (1, 2, 3, ...)
+        if data_start < len(rows):
+            numbering_row = rows[data_start]
+            if numbering_row and all(
+                str(c).strip().isdigit() or c is None
+                for c in numbering_row
+            ):
+                data_start += 1
 
         for row_idx in range(data_start, len(rows)):
             row = rows[row_idx]
@@ -162,7 +197,16 @@ class KaspiStatementParser(BaseParser):
                     continue
 
             raw_dir = clean_string(self._get(row, col_map.get('direction')))
+            op_type = clean_string(self._get(row, col_map.get('operation_type')))
             direction = determine_direction(raw_direction=raw_dir) if raw_dir else None
+
+            # Determine direction from operation type if not explicit
+            if not direction and op_type:
+                op_low = op_type.lower()
+                if 'дебет' in op_low or 'исх' in op_low:
+                    direction = 'Расход'
+                elif 'кредит' in op_low or 'вх' in op_low:
+                    direction = 'Приход'
 
             t = Transaction(
                 transaction_date=normalize_date(date_val),
@@ -172,13 +216,13 @@ class KaspiStatementParser(BaseParser):
                 direction=direction,
                 payer=clean_string(self._get(row, col_map.get('payer'))),
                 payer_iin_bin=normalize_iin_bin(self._get(row, col_map.get('payer_iin'))),
-                payer_bank=None,
-                payer_account=None,
+                payer_bank=clean_string(self._get(row, col_map.get('payer_bank'))),
+                payer_account=clean_string(self._get(row, col_map.get('payer_account'))),
                 recipient=clean_string(self._get(row, col_map.get('recipient'))),
                 recipient_iin_bin=normalize_iin_bin(self._get(row, col_map.get('recipient_iin'))),
-                recipient_bank=None,
-                recipient_account=None,
-                operation_type=None,
+                recipient_bank=clean_string(self._get(row, col_map.get('recipient_bank'))),
+                recipient_account=clean_string(self._get(row, col_map.get('recipient_account'))),
+                operation_type=op_type,
                 knp=clean_string(self._get(row, col_map.get('knp'))),
                 payment_purpose=clean_string(self._get(row, col_map.get('payment_purpose'))),
                 document_number=None,
