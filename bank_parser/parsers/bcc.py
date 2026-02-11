@@ -116,6 +116,18 @@ class BCCFullParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
+        # Scan for BCC identifiers in metadata
+        found_bcc_id = False
+        for row in sheet.rows[:20]:
+            for cell in row:
+                if cell:
+                    cs = str(cell)
+                    if 'BCCBKZKX' in cs or 'ЦентрКредит' in cs or 'ЦЕНТРКРЕДИТ' in cs.upper():
+                        found_bcc_id = True
+                        break
+            if found_bcc_id:
+                break
+
         for row in sheet.rows[:20]:
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'отправитель' in row_text and 'получатель' in row_text and 'назначение' in row_text:
@@ -126,9 +138,15 @@ class BCCFullParser(BaseParser):
             if 'күні / дата' in row_text or ('дебетовый оборот' in row_text and 'кредитовый оборот' in row_text):
                 return 0.92
             if 'выписка по лицевому счету' in row_text:
+                if found_bcc_id:
+                    return 0.90  # SWIFT/bank name confirms BCC
                 folder = file_info.get('folder_name', '').lower()
                 if 'центркредит' in folder:
                     return 0.88
+                return 0.65  # Generic title, low confidence
+
+        if found_bcc_id and sheet.num_cols >= 7:
+            return 0.6
         folder = file_info.get('folder_name', '').lower()
         if 'центркредит' in folder and sheet.num_cols >= 7:
             return 0.5
@@ -268,10 +286,23 @@ class BCCClientMovementParser(BaseParser):
                     return 0.93
         # Check sheet names for direction-based multi-sheet
         sn = sheet.name.lower()
-        if ('входящие' in sn or 'исходящие' in sn or 'снятие' in sn):
+        if 'входящие' in sn or 'исходящие' in sn or 'снятие' in sn:
+            # Check for BCC-specific header columns (unique)
+            for row in sheet.rows[:5]:
+                row_text = ' '.join(str(c).lower() for c in row if c)
+                if 'наименование дебет' in row_text or 'подразделение' in row_text:
+                    return 0.88  # Unique BCC header
+            # Check for BCC identifiers in metadata
+            for row in sheet.rows[:10]:
+                for cell in row:
+                    if cell:
+                        cs = str(cell)
+                        if 'BCCBKZKX' in cs or 'ЦентрКредит' in cs or 'ЦЕНТРКРЕДИТ' in cs.upper():
+                            return 0.88
             folder = file_info.get('folder_name', '').lower()
             if 'центркредит' in folder:
                 return 0.88
+            return 0.4  # Generic sheet names, no confirmation
         return 0.0
 
     def parse_sheet(self, sheet: SheetData, file_info: dict) -> Tuple[List[Transaction], dict]:

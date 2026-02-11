@@ -141,18 +141,52 @@ class AlHilalFullParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
-        # Check for Al Hilal folder + many columns
         folder = file_info.get('folder_name', '').lower()
-        if 'al hilal' not in folder:
-            return 0.0
-        # Header at row 0 or 1 with full column set
+
+        # Scan for Al Hilal bank identifiers
+        found_al_hilal_id = False
+        for row in sheet.rows[:20]:
+            for cell in row:
+                if cell:
+                    cs = str(cell)
+                    if 'HLALKZKZ' in cs or 'Al Hilal' in cs or 'AL HILAL' in cs.upper():
+                        found_al_hilal_id = True
+                        break
+            if found_al_hilal_id:
+                break
+
+        # Check for РНН (unique to Al Hilal) in headers
+        has_rnn = False
+        for row in sheet.rows[:5]:
+            if any(c and 'рнн' in str(c).lower() for c in row):
+                has_rnn = True
+                break
+
+        # Header at row 0-2 with full column set
         for row in sheet.rows[:3]:
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'отправитель' in row_text and 'получатель' in row_text:
-                return 0.96  # Higher than Tsesnabank's 0.95
+                if found_al_hilal_id:
+                    return 0.97
+                if has_rnn:
+                    return 0.96  # РНН is unique to Al Hilal
+                if 'al hilal' in folder:
+                    return 0.96
+                if sheet.num_cols >= 15:
+                    return 0.85
+                return 0.0
             if 'код' in row_text and 'сумма' in row_text and sheet.num_cols >= 15:
-                return 0.96
-        if sheet.num_cols >= 15:
+                if found_al_hilal_id:
+                    return 0.97
+                if has_rnn:
+                    return 0.96
+                if 'al hilal' in folder:
+                    return 0.96
+                return 0.8
+
+        if found_al_hilal_id and sheet.num_cols >= 15:
+            return 0.85
+        if 'al hilal' in folder and sheet.num_cols >= 15:
             return 0.85
         return 0.0
 

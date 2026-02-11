@@ -145,9 +145,15 @@ class BankRBKSimpleParser(BaseParser):
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'номер карты' in row_text and 'назначение платежа' in row_text:
                 folder = file_info.get('folder_name', '').lower()
-                if 'rbk' in folder:
-                    return 0.85
+                if 'rbk' in folder or 'рбк' in folder:
+                    return 0.90
+                return 0.85  # Unique header combination — no folder needed
         return 0.0
+
+    def parse(self, sheets, file_info):
+        """Override to skip irrelevant sheets (e.g. 'script' sheet)."""
+        relevant = [s for s in sheets if s.name.lower() not in ('script',)]
+        return super().parse(relevant, file_info)
 
     def parse_sheet(self, sheet: SheetData, file_info: dict) -> Tuple[List[Transaction], dict]:
         rows = sheet.rows

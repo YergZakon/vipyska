@@ -26,14 +26,40 @@ class KazkomParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
-        for row in sheet.rows[:5]:
+        found_kazkom_id = False
+        found_statement_title = False
+        found_dot_pattern = False
+
+        for i, row in enumerate(sheet.rows[:15]):
             for cell in row:
-                if cell and 'выписка по счету' in str(cell).lower():
-                    folder = file_info.get('folder_name', '').lower()
-                    if 'казкоммерц' in folder:
-                        return 0.95
-                    return 0.6
+                if cell:
+                    cs = str(cell)
+                    cl = cs.lower()
+                    # SWIFT code is definitive anywhere
+                    if 'KZKOKZKX' in cs:
+                        found_kazkom_id = True
+                    # Bank name only in metadata rows (first 10), not in data
+                    if i < 10 and ('казкоммерцбанк' in cl and 'облигации' not in cl):
+                        found_kazkom_id = True
+                    if 'дата постирования' in cl:
+                        return 0.95  # Unique misspelling in Kazkom card format
+                    if 'выписка по счету' in cl:
+                        found_statement_title = True
+                    if '. . . :' in cs:
+                        found_dot_pattern = True
+
         folder = file_info.get('folder_name', '').lower()
+
+        if found_kazkom_id and found_statement_title:
+            return 0.95
+        if found_kazkom_id:
+            return 0.90
+        if found_statement_title:
+            if found_dot_pattern:
+                return 0.85  # Unique Kazkom text-block format
+            if 'казкоммерц' in folder:
+                return 0.95
+            return 0.6
         if 'казкоммерц' in folder:
             return 0.7
         return 0.0

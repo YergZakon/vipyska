@@ -101,31 +101,49 @@ class Standard18ColParser(BaseParser):
         return 0.0
 
     def _detect_bank_name(self, sheet: SheetData, file_info: dict) -> str:
-        """Detect specific bank from folder name or data content."""
-        folder = file_info.get('folder_name', '').lower()
+        """Detect specific bank from data content, with folder as fallback."""
+        # SWIFT code map for 18-col banks
+        swift_to_bank = {
+            'VTBAKZKA': 'ДО АО Банк ВТБ (Казахстан)',
+            'SHBKKZKA': 'АО Шинхан Банк Казахстан',
+        }
 
-        if 'втб' in folder or 'vtb' in folder.lower():
+        # Step 1: Scan data for SWIFT codes and bank name mentions
+        header_idx = _find_header_idx(sheet.rows)
+        scan_end = min(len(sheet.rows), (header_idx or 0) + 10)
+        for row in sheet.rows[:scan_end]:
+            for cell in row:
+                if cell:
+                    cs = str(cell)
+                    cl = cs.lower()
+                    for swift, bank_name in swift_to_bank.items():
+                        if swift in cs:
+                            return bank_name
+                    if 'втб' in cl:
+                        return 'ДО АО Банк ВТБ (Казахстан)'
+                    if 'shinhan' in cl or 'шинхан' in cl:
+                        return 'АО Шинхан Банк Казахстан'
+                    if 'home credit' in cl or 'хоум кредит' in cl:
+                        return 'АО Home Credit Bank'
+                    if 'фридом финанс' in cl:
+                        return 'АО Банк Фридом Финанс Казахстан'
+                    if 'фридом' in cl and 'банк' in cl:
+                        return 'АО Фридом Банк Казахстан'
+
+        # Step 2: Folder fallback
+        folder = file_info.get('folder_name', '').lower()
+        if 'втб' in folder or 'vtb' in folder:
             return 'ДО АО Банк ВТБ (Казахстан)'
-        if 'шинхан' in folder or 'shinhan' in folder.lower():
+        if 'шинхан' in folder or 'shinhan' in folder:
             return 'АО Шинхан Банк Казахстан'
-        if 'home credit' in folder.lower() or 'хоум' in folder.lower():
+        if 'home credit' in folder or 'хоум' in folder:
             return 'АО Home Credit Bank'
         if 'фридом финанс' in folder:
             return 'АО Банк Фридом Финанс Казахстан'
         if 'фридом банк' in folder or 'фридом' in folder:
             return 'АО Фридом Банк Казахстан'
 
-        # Try to detect from data
-        for row in sheet.rows[:5]:
-            for cell in row:
-                if cell:
-                    cell_str = str(cell).lower()
-                    if 'втб' in cell_str:
-                        return 'ДО АО Банк ВТБ (Казахстан)'
-                    if 'shinhan' in cell_str or 'шинхан' in cell_str:
-                        return 'АО Шинхан Банк Казахстан'
-
-        return file_info.get('folder_name', 'Неизвестный банк')
+        return file_info.get('folder_name', '') or 'Неизвестный банк'
 
     def parse_sheet(self, sheet: SheetData, file_info: dict) -> Tuple[List[Transaction], dict]:
         rows = sheet.rows

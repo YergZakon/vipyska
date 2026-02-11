@@ -21,14 +21,41 @@ class KassaNovaParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
-        for row in sheet.rows[:10]:
+        found_section_marker = False
+        found_beneficiary = False
+        found_company_header = False  # Delta Bank pattern
+
+        for row in sheet.rows[:15]:
             for cell in row:
-                if cell and 'входящие платежи' in str(cell).lower():
-                    folder = file_info.get('folder_name', '').lower()
-                    if 'kassa nova' in folder:
-                        return 0.95
-                    return 0.6
+                if cell:
+                    cl = str(cell).lower().strip()
+                    if cl in ('входящие платежи', 'исходящие платежи'):
+                        found_section_marker = True
+                    elif 'поступления на текущий счет' in cl:
+                        found_section_marker = True
+            row_text = ' '.join(str(c).lower() for c in row if c)
+            if 'бенефициар' in row_text:
+                found_beneficiary = True
+            # Delta Bank uses "Наименование компании" — never Kassa Nova
+            if 'наименование компании' in row_text:
+                found_company_header = True
+
+        # If "Наименование компании" found — this is Delta Bank, not Kassa Nova
+        if found_company_header:
+            return 0.0
+
         folder = file_info.get('folder_name', '').lower()
+
+        if found_section_marker and found_beneficiary:
+            return 0.95  # Unique combo
+        if found_section_marker:
+            if 'kassa nova' in folder:
+                return 0.95
+            if sheet.num_cols <= 6:
+                return 0.85  # 5-col format typical of Kassa Nova
+            return 0.6
+        if found_beneficiary:
+            return 0.85  # бенефициара/отправителя is unique to Kassa Nova
         if 'kassa nova' in folder:
             return 0.7
         return 0.0

@@ -29,6 +29,10 @@ class EurasianCardParser(BaseParser):
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'тип операции' in row_text and 'детали операции' in row_text:
                 return 0.9
+            # 7-col with one unique marker
+            if len([c for c in row if c]) == 7:
+                if 'тип операции' in row_text or 'детали операции' in row_text:
+                    return 0.8
         folder = file_info.get('folder_name', '').lower()
         if 'евразийский' in folder:
             for row in sheet.rows[:5]:

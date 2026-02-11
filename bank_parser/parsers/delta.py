@@ -26,16 +26,32 @@ class DeltaBankParser(BaseParser):
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
         folder = file_info.get('folder_name', '').lower()
-        if 'delta bank' in folder:
-            return 0.9
+
+        found_delta_mention = False
+        found_company_header = False
+        found_direction_label = False
 
         for row in sheet.rows[:5]:
             for cell in row:
-                if cell and 'delta bank' in str(cell).lower():
-                    return 0.85
+                if cell:
+                    cl = str(cell).lower().strip()
+                    if 'delta bank' in cl:
+                        found_delta_mention = True
+                    if cl in ('входящие платежи', 'исходящие платежи'):
+                        found_direction_label = True
             row_text = ' '.join(str(c).lower() for c in row if c)
-            if '№ п/п' in row_text and 'наименование компании' in row_text:
-                return 0.7
+            if 'наименование компании' in row_text and 'дата операции' in row_text:
+                found_company_header = True
+
+        if 'delta bank' in folder:
+            return 0.9
+        if found_delta_mention:
+            return 0.88
+        # Unique Delta combo: direction label + "Наименование компании" + "Дата операции"
+        if found_direction_label and found_company_header:
+            return 0.88
+        if found_company_header:
+            return 0.80
         return 0.0
 
     def parse(self, sheets, file_info):

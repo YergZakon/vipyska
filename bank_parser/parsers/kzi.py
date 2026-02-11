@@ -24,15 +24,39 @@ class KZIBankParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
+        found_kzi_header = False
+        found_sdp_header = False
+
         for row in sheet.rows[:10]:
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'дата транзакции' in row_text and 'держатель карты' in row_text:
                 return 0.95
             if 'вход. оборот' in row_text or 'исход. оборот' in row_text:
                 return 0.9
+            # СДП format: 8 cols — Наименование + Дата + Сумма + Валюта + ИИН/БИН + Описание
+            if ('наименование' in row_text and 'сумма' in row_text
+                    and 'валюта' in row_text and 'описание' in row_text
+                    and 'иин/бин' in row_text):
+                found_sdp_header = True
+
+        # Check metadata for KZI-specific patterns (e.g. "Транзакций с ... по ...")
+        for row in sheet.rows[:10]:
+            for cell in row:
+                if cell:
+                    cl = str(cell).lower()
+                    if 'транзакций с' in cl:
+                        found_kzi_header = True
+
+        if found_sdp_header and found_kzi_header:
+            return 0.92  # СДП format with "Транзакций с..." marker
+        if found_sdp_header:
+            folder = file_info.get('folder_name', '').lower()
+            if 'кзи' in folder:
+                return 0.90
+            return 0.82  # Generic but unique combo of cols
+
         folder = file_info.get('folder_name', '').lower()
         if 'кзи банк' in folder or 'кзи' in folder:
-            # Check for any recognizable header
             for row in sheet.rows[:15]:
                 row_text = ' '.join(str(c).lower() for c in row if c)
                 if ('дата' in row_text and 'сумма' in row_text) or 'наименование' in row_text:
@@ -51,6 +75,10 @@ class KZIBankParser(BaseParser):
                 header_idx = i
                 break
             if 'дата' in row_text and 'сумма' in row_text and 'наименование' in row_text:
+                header_idx = i
+                break
+            # СДП 8-col format: № п/п | Наименование | Дата | Сумма | Валюта | ИИН/БИН | Наименование клиента | Описание
+            if '№ п/п' in row_text and 'наименование' in row_text and 'описание' in row_text:
                 header_idx = i
                 break
 

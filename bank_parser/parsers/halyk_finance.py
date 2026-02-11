@@ -28,8 +28,13 @@ class HalykFinanceParser(BaseParser):
             row_text = ' '.join(str(c).lower() for c in row if c)
             if 'режим сделки' in row_text or 'тикер' in row_text:
                 return 0.9
-            if 'сорт д-та' in row_text:
+            if 'сорт д-та' in row_text or 'сорта д-та' in row_text:
                 return 0.9
+            # Halyk Finance unique combo: "Код инстр-та" + "Счет расхода" + "Контрагент"
+            if 'инстр-та' in row_text and 'счет расхода' in row_text:
+                return 0.9
+            if 'код валюты' in row_text and 'контрагент' in row_text and 'счет расхода' in row_text:
+                return 0.88
         folder = file_info.get('folder_name', '').lower()
         if 'halyk finance' in folder:
             return 0.8
@@ -69,7 +74,7 @@ class HalykFinanceParser(BaseParser):
                 col_map['date'] = i
             elif 'режим' in h:
                 col_map['mode'] = i
-            elif 'сорт' in h:
+            elif 'сорт' in h or 'сорта' in h:
                 col_map['doc_type'] = i
             elif 'тикер' in h:
                 col_map['ticker'] = i

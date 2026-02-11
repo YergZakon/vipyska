@@ -25,20 +25,36 @@ class NurbankParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
+        # Scan for SWIFT/BIK code or bank name in metadata
+        found_nurbank_id = False
+        for row in sheet.rows[:15]:
+            for cell in row:
+                if cell:
+                    cs = str(cell)
+                    if 'NURSKZKX' in cs or 'Нурбанк' in cs or 'НУРБАНК' in cs.upper():
+                        found_nurbank_id = True
+                        break
+            if found_nurbank_id:
+                break
+
         for row in sheet.rows[:10]:
             for cell in row:
                 if cell and 'операции, проведенные в абис' in str(cell).lower():
                     return 0.95
-        # 16-col format with header at row 13
-        for row in sheet.rows[:15]:
+
+        # 16-col format
+        folder = file_info.get('folder_name', '').lower()
+        for row in sheet.rows[:20]:
             row_text = ' '.join(str(c).lower() for c in row if c)
             if '№ п/п' in row_text and ('дата операции' in row_text or 'категория' in row_text):
-                folder = file_info.get('folder_name', '').lower()
+                if found_nurbank_id:
+                    return 0.92
                 if 'нурбанк' in folder:
                     return 0.9
                 return 0.7
             if 'плательщик' in row_text and 'получатель' in row_text:
-                folder = file_info.get('folder_name', '').lower()
+                if found_nurbank_id:
+                    return 0.92
                 if 'нурбанк' in folder:
                     return 0.9
                 return 0.7
@@ -160,14 +176,31 @@ class NurbankXlsParser(BaseParser):
 
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
+        # Scan for bank identifiers in metadata
+        found_nurbank_id = False
+        for row in sheet.rows[:15]:
+            for cell in row:
+                if cell:
+                    cs = str(cell)
+                    if 'NURSKZKX' in cs or 'Нурбанк' in cs or 'НУРБАНК' in cs.upper():
+                        found_nurbank_id = True
+                        break
+            if found_nurbank_id:
+                break
+
         folder = file_info.get('folder_name', '').lower()
-        if 'нурбанк' not in folder:
-            return 0.0
         for row in sheet.rows[:15]:
             row_text = ' '.join(str(c).lower() for c in row if c)
             if ('дата' in row_text and 'дебет' in row_text and 'кредит' in row_text and
                     ('корреспондент' in row_text or 'назначение' in row_text)):
-                return 0.92
+                if found_nurbank_id:
+                    return 0.95  # SWIFT/BIK confirms Nurbank
+                if 'нурбанк' in folder:
+                    return 0.92
+                # Check unique Nurbank feature: эквивалент columns
+                if 'эквивалент' in row_text:
+                    return 0.88  # Unique 4-amount-column pattern
+                return 0.7  # Generic structure
         return 0.0
 
     def parse_sheet(self, sheet: SheetData, file_info: dict) -> Tuple[List[Transaction], dict]:

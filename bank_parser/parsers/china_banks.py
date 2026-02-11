@@ -149,6 +149,25 @@ class TPBKitayaParser(BaseParser):
     """АО Торгово-промышленный банк Китая в Алматы."""
     BANK_NAME = 'АО Торгово-промышленный банк Китая в Алматы'
 
+    def parse(self, sheets, file_info):
+        """Override to skip metadata-only and garbled sheets."""
+        relevant = []
+        for s in sheets:
+            # Skip garbled Chinese-only sheets (e.g. '页面1-1') and sheets without data headers
+            if s.num_cols < 3:
+                continue
+            has_data_header = False
+            for row in s.rows[:5]:
+                row_text = ' '.join(str(c).lower() for c in row if c)
+                if 'дата' in row_text or 'күн' in row_text or 'дебет' in row_text or 'референс' in row_text:
+                    has_data_header = True
+                    break
+            if has_data_header:
+                relevant.append(s)
+        if not relevant:
+            relevant = sheets  # fallback
+        return super().parse(relevant, file_info)
+
     @classmethod
     def can_parse(cls, sheet: SheetData, file_info: dict) -> float:
         for row in sheet.rows[:5]:
